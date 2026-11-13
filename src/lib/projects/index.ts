@@ -6,6 +6,17 @@ import { isAdminForOrg } from '$lib/utils/roles';
 import { idSchema, langtagRegex, paginateSchema, requiredString } from '$lib/valibot';
 import { manualVersionCodeMatch } from '$lib/workflowTypes';
 
+// Who has the project checked out in App Builder, if anyone,
+// and whether the next upload is allowed to replace the current version
+export const projectCheckoutSelect = {
+  CheckedOutById: true,
+  DateCheckedOut: true,
+  CheckedOutBy: { select: { Id: true, Name: true } },
+  OverwriteAllowedById: true,
+  DateOverwriteAllowed: true,
+  OverwriteAllowedBy: { select: { Id: true, Name: true } }
+} satisfies Prisma.ProjectsSelect;
+
 export const projectSelect = {
   Id: true,
   Name: true,

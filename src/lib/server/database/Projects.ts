@@ -1,9 +1,11 @@
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Prisma } from '@prisma/client';
 import { BullMQ, getQueues } from '../bullmq/index';
+import * as projectActions from './ProjectActions';
 import prisma from './prisma';
 import type { RequirePrimitive, TXClient } from './utility';
-import { RoleId } from '$lib/prisma';
+import { ProjectActionString, ProjectActionType, RoleId } from '$lib/prisma';
+import { projectCheckoutSelect } from '$lib/projects';
 import { manualVersionCodeMatch } from '$lib/workflowTypes';
 
 /**
@@ -275,4 +277,140 @@ export async function getUsersByRole(projectId: number, roles?: RoleId[]) {
       ]) as [number, Set<RoleId>][]
     ).filter((u) => u[1].size)
   );
+}
+
+/**
+ * Checks out a project so that only this user can upload changes from App Builder.
+ * Does nothing if the project is already checked out, by this user or anyone else.
+ * @returns the checkout state afterwards. The checkout succeeded iff `CheckedOutById === userId`
+ */
+export async function checkOut(projectId: number, userId: number) {
+  // Matching on CheckedOutById: null makes this atomic, so two users can't both check out
+  const res = await prisma.projects.updateMany({
+    where: { Id: projectId, CheckedOutById: null },
+    data: { CheckedOutById: userId, DateCheckedOut: new Date() }
+  });
+  if (res.count) {
+    await projectActions.create({
+      ProjectId: projectId,
+      UserId: userId,
+      ActionType: ProjectActionType.Checkout,
+      Action: ProjectActionString.CheckOut
+    });
+  }
+  return prisma.projects.findUniqueOrThrow({
+    where: { Id: projectId },
+    select: projectCheckoutSelect
+  });
+}
+
+/**
+ * Checks in a project that this user has checked out.
+ * @returns false if the user did not have the project checked out
+ */
+export async function checkIn(projectId: number, userId: number) {
+  const res = await prisma.projects.updateMany({
+    where: { Id: projectId, CheckedOutById: userId },
+    data: { CheckedOutById: null, DateCheckedOut: null }
+  });
+  if (res.count) {
+    await projectActions.create({
+      ProjectId: projectId,
+      UserId: userId,
+      ActionType: ProjectActionType.Checkout,
+      Action: ProjectActionString.CheckIn
+    });
+  }
+  return !!res.count;
+}
+
+/**
+ * Releases whoever has the project checked out, e.g. if they forgot to check it in.
+ * @returns false if the project was not checked out
+ */
+export async function unlock(projectId: number, unlockedById: number) {
+  const { CheckedOutById } = await prisma.projects.findUniqueOrThrow({
+    where: { Id: projectId },
+    select: { CheckedOutById: true }
+  });
+  if (CheckedOutById === null) return false;
+  // Only release the checkout we looked up, in case it changed in the meantime
+  const res = await prisma.projects.updateMany({
+    where: { Id: projectId, CheckedOutById },
+    data: { CheckedOutById: null, DateCheckedOut: null }
+  });
+  if (res.count) {
+    await projectActions.create({
+      ProjectId: projectId,
+      UserId: unlockedById,
+      ActionType: ProjectActionType.Checkout,
+      Action: ProjectActionString.Unlock,
+      ExternalId: CheckedOutById
+    });
+  }
+  return !!res.count;
+}
+
+/**
+ * Lets the next upload replace the current version without a checkout.
+ * Only the project owner or an org admin should be able to do this.
+ */
+export async function allowOverwrite(projectId: number, userId: number) {
+  await prisma.projects.update({
+    where: { Id: projectId },
+    data: { OverwriteAllowedById: userId, DateOverwriteAllowed: new Date() }
+  });
+  await projectActions.create({
+    ProjectId: projectId,
+    UserId: userId,
+    ActionType: ProjectActionType.Checkout,
+    Action: ProjectActionString.AllowOverwrite
+  });
+}
+
+/**
+ * Withdraws permission for the next upload to replace the current version
+ * @returns false if no overwrite was allowed
+ */
+export async function cancelOverwrite(projectId: number, userId: number) {
+  const res = await prisma.projects.updateMany({
+    where: { Id: projectId, OverwriteAllowedById: { not: null } },
+    data: { OverwriteAllowedById: null, DateOverwriteAllowed: null }
+  });
+  if (res.count) {
+    await projectActions.create({
+      ProjectId: projectId,
+      UserId: userId,
+      ActionType: ProjectActionType.Checkout,
+      Action: ProjectActionString.CancelOverwrite
+    });
+  }
+  return !!res.count;
+}
+
+/**
+ * Uses up the permission for an upload to replace the current version, if any,
+ * once that upload has been given its credentials
+ */
+export async function useOverwrite(projectId: number, userId: number) {
+  const { OverwriteAllowedById } = await prisma.projects.findUniqueOrThrow({
+    where: { Id: projectId },
+    select: { OverwriteAllowedById: true }
+  });
+  if (OverwriteAllowedById === null) return false;
+  // Only one upload can use the permission, even if two start at the same time
+  const res = await prisma.projects.updateMany({
+    where: { Id: projectId, OverwriteAllowedById },
+    data: { OverwriteAllowedById: null, DateOverwriteAllowed: null }
+  });
+  if (res.count) {
+    await projectActions.create({
+      ProjectId: projectId,
+      UserId: userId,
+      ActionType: ProjectActionType.Checkout,
+      Action: ProjectActionString.OverwriteUsed,
+      ExternalId: OverwriteAllowedById
+    });
+  }
+  return !!res.count;
 }

@@ -61,6 +61,7 @@ export const load = (async ({ locals, params }) => {
 
   const updatesAllowList = await getSiteParam('software-updates', 'allow-orgs');
   const repoAllowList = await getSiteParam('projects', 'org-show-repo-url');
+  const checkoutAllowList = await getSiteParam('projects', 'org-require-checkout');
 
   return {
     projectData: await getProjectDetails(projectId, locals.security.sessionForm),
@@ -74,6 +75,8 @@ export const load = (async ({ locals, params }) => {
       repoAllowList === 'all' ||
       repoAllowList.includes(check!.OrganizationId) ||
       locals.security.isSuperAdmin,
+    checkoutRequired:
+      checkoutAllowList === 'all' || checkoutAllowList.includes(check!.OrganizationId),
     projectURL: projectUrl(projectId)
   };
 }) satisfies PageServerLoad;
@@ -121,6 +124,52 @@ export const actions = {
       ExternalId: product.ProductDefinitionId
     });
     return { form, ok: true };
+  },
+  // Checks in the project for the user who has it checked out in App Builder,
+  // or lets the owner or an org admin unlock someone else's checkout
+  async releaseCheckout(event) {
+    event.locals.security.requireAuthenticated();
+    const ProjectId = parseInt(event.params.id);
+    const userId = event.locals.security.userId;
+    const project = await DatabaseReads.projects.findUnique({
+      where: { Id: ProjectId },
+      select: { OwnerId: true, OrganizationId: true, CheckedOutById: true }
+    });
+    const isHolder = !!project && project.CheckedOutById === userId;
+    if (!isHolder) event.locals.security.requireProjectWriteAccess(project);
+    if (!QueueConnected()) return error(503);
+    const ok = isHolder
+      ? await DatabaseWrites.projects.checkIn(ProjectId, userId)
+      : await DatabaseWrites.projects.unlock(ProjectId, userId);
+    return { ok };
+  },
+  // Lets the next upload from App Builder replace the current version without a checkout
+  async allowOverwrite(event) {
+    const ProjectId = parseInt(event.params.id);
+    event.locals.security.requireProjectWriteAccess(
+      await DatabaseReads.projects.findUnique({
+        where: { Id: ProjectId },
+        select: { OwnerId: true, OrganizationId: true }
+      })
+    );
+    if (!QueueConnected()) return error(503);
+    await DatabaseWrites.projects.allowOverwrite(ProjectId, event.locals.security.userId);
+    return { ok: true };
+  },
+  async cancelOverwrite(event) {
+    const ProjectId = parseInt(event.params.id);
+    event.locals.security.requireProjectWriteAccess(
+      await DatabaseReads.projects.findUnique({
+        where: { Id: ProjectId },
+        select: { OwnerId: true, OrganizationId: true }
+      })
+    );
+    if (!QueueConnected()) return error(503);
+    const ok = await DatabaseWrites.projects.cancelOverwrite(
+      ProjectId,
+      event.locals.security.userId
+    );
+    return { ok };
   },
   async deleteAuthor(event) {
     const ProjectId = parseInt(event.params.id);

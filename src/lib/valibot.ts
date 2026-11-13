@@ -118,7 +118,10 @@ export const SiteParamSchemas = {
     'allow-orgs': whitelist
   }),
   projects: v.strictObject({
-    'org-show-repo-url': whitelist
+    'org-show-repo-url': whitelist,
+    // Orgs where App Builder can only upload to a project that the user has checked out,
+    // unless it is the project's first upload or an owner or admin has allowed an overwrite
+    'org-require-checkout': whitelist
   }),
   users: v.strictObject({
     'org-show-support-agent': whitelist

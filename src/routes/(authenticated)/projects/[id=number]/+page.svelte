@@ -3,7 +3,7 @@
   import type { Readable } from 'svelte/store';
   import { source } from 'sveltekit-sse';
   import ProductCard from './ProductCard.svelte';
-  import { Authors, OwnerGroup, Reviewers, Settings } from './forms';
+  import { Authors, Checkout, OwnerGroup, Reviewers, Settings } from './forms';
   import { AddProduct } from './modals';
   import { page } from '$app/state';
   import BlockIfJobsUnavailable from '$lib/components/BlockIfJobsUnavailable.svelte';
@@ -288,6 +288,15 @@
       </div>
       <!-- Sidebar Settings -->
       <div class="space-y-2 min-w-0 flex-auto sidebararea">
+        <Checkout
+          checkout={projectData.project}
+          userId={data.session.user.userId}
+          endpoint="releaseCheckout"
+          allowOverwriteEndpoint="allowOverwrite"
+          cancelOverwriteEndpoint="cancelOverwrite"
+          checkoutRequired={data.checkoutRequired}
+          {canEdit}
+        />
         <OwnerGroup
           project={projectData.project}
           users={projectData.possibleProjectOwners}

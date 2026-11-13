@@ -1,6 +1,13 @@
 import { json } from '@sveltejs/kit';
-import { createAppBuildersError } from '../common';
-import { ProjectActionType, RoleId } from '$lib/prisma';
+import {
+  createAppBuildersError,
+  createCheckedOutError,
+  hasBeenUploaded,
+  hasRepositoryWriteAccess,
+  isCheckoutRequired
+} from '../common';
+import { ProjectActionType } from '$lib/prisma';
+import { projectCheckoutSelect } from '$lib/projects';
 import { BuildEngine } from '$lib/server/build-engine-api';
 import { DatabaseReads, DatabaseWrites } from '$lib/server/database';
 
@@ -37,6 +44,7 @@ export async function POST({ params, locals, request }) {
     select: {
       RepositoryUrl: true,
       BuildEngineProjectId: true,
+      OwnerId: true,
       Owner: {
         select: {
           Id: true,
@@ -48,7 +56,8 @@ export async function POST({ params, locals, request }) {
           UserId: true
         }
       },
-      OrganizationId: true
+      OrganizationId: true,
+      ...projectCheckoutSelect
     }
   });
   if (!project) return createAppBuildersError(404, `Project id=${projectId} not found`);
@@ -56,46 +65,40 @@ export async function POST({ params, locals, request }) {
   if (!project.RepositoryUrl)
     return createAppBuildersError(404, `Project id=${projectId}: RepositoryUrl is null`);
 
-  // Check ownership
-  let readOnly: boolean | null = null;
-  if (locals.security.userId === project.Owner.Id) {
-    readOnly = false;
-  }
-
-  // Check roles
-  if (readOnly === null) {
-    try {
-      locals.security.requireAdminOfOrg(project.OrganizationId);
-      readOnly = false;
-    } catch {
-      /* empty */
-    }
-  }
-
-  // Check authors
-  if (readOnly === null) {
-    try {
-      locals.security.requireHasRole(project.OrganizationId, RoleId.Author, false);
-      // ISSUE: #1101 Kalaam now wants authors to be able to update at any time.  In the future, we can add a setting on the author to whether they are a restricted author or not. I don't have time to add the UI at the moment.
-      //readOnly = !author.CanUpdate;
-      if (project.Authors.some(({ UserId }) => UserId === locals.security.userId)) {
-        readOnly = false;
-      }
-    } catch {
-      /* empty */
-    }
-  }
-
-  if (readOnly === null)
+  if (!hasRepositoryWriteAccess(locals.security, project))
     return createAppBuildersError(
       403,
       `Project id=${projectId}, user='${user.Name}' with email='${user.Email}' does not have permission to access`
     );
 
-  if (tokenUse && tokenUse === TOKEN_USE_UPLOAD && readOnly)
+  // While someone else has the project checked out, everyone else gets read-only access
+  const checkedOutByOther =
+    project.CheckedOutById !== null && project.CheckedOutById !== locals.security.userId;
+  let readOnly = checkedOutByOther;
+  let mustCheckOut = false;
+
+  // Where checkout is required, uploading without the checkout could overwrite someone's work.
+  // Only an upload that can't do that is allowed: the project's first upload,
+  // or one that an owner or admin has allowed to overwrite the current version.
+  if (
+    !readOnly &&
+    project.CheckedOutById !== locals.security.userId &&
+    (await isCheckoutRequired(project.OrganizationId))
+  ) {
+    readOnly = !(
+      tokenUse === TOKEN_USE_UPLOAD &&
+      (project.OverwriteAllowedById !== null || !(await hasBeenUploaded(projectId)))
+    );
+    mustCheckOut = readOnly;
+  }
+
+  if (tokenUse && tokenUse === TOKEN_USE_UPLOAD && checkedOutByOther)
+    return createCheckedOutError(projectId, project);
+
+  if (tokenUse && tokenUse === TOKEN_USE_UPLOAD && mustCheckOut)
     return createAppBuildersError(
-      403,
-      `Project id=${projectId}, user='${user.Name}' with email='${user.Email}' does not have permission to Upload`
+      409,
+      `Project id=${projectId} must be checked out before uploading changes, so that they are made to the latest version`
     );
 
   const tokenResult = await BuildEngine.Requests.getProjectAccessToken(
@@ -138,6 +141,11 @@ export async function POST({ params, locals, request }) {
       ActionType: ProjectActionType.Access,
       Action: use
     });
+  }
+
+  // An owner or admin may have allowed this upload to replace the current version
+  if (tokenUse === TOKEN_USE_UPLOAD && project.OverwriteAllowedById !== null) {
+    await DatabaseWrites.projects.useOverwrite(projectId, user.Id);
   }
 
   return json({ data: projectToken });

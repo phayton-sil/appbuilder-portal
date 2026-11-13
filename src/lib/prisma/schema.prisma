@@ -283,6 +283,10 @@ model Projects {
   DateActive              DateTime?        @db.Timestamp(6)
   ImportId                Int?
   Properties              String?
+  CheckedOutById          Int?
+  DateCheckedOut          DateTime?        @db.Timestamp(6)
+  OverwriteAllowedById    Int?
+  DateOverwriteAllowed    DateTime?        @db.Timestamp(6)
   Authors                 Authors[]
   Products                Products[]
   ApplicationType         ApplicationTypes @relation(fields: [TypeId], references: [Id], onUpdate: NoAction, map: "FK_Projects_ApplicationTypes_TypeId")
@@ -290,12 +294,18 @@ model Projects {
   Organization            Organizations    @relation(fields: [OrganizationId], references: [Id], onUpdate: NoAction, map: "FK_Projects_Organizations_OrganizationId")
   ProjectImport           ProjectImports?  @relation(fields: [ImportId], references: [Id], onDelete: Restrict, onUpdate: NoAction, map: "FK_Projects_ProjectImports_ImportId")
   Owner                   Users            @relation(fields: [OwnerId], references: [Id], onUpdate: NoAction, map: "FK_Projects_Users_OwnerId")
+  // User who has the project checked out in App Builder. Others cannot upload until it is checked in or unlocked.
+  CheckedOutBy            Users?           @relation("ProjectCheckouts", fields: [CheckedOutById], references: [Id], onDelete: SetNull, onUpdate: NoAction, map: "FK_Projects_Users_CheckedOutById")
+  // Owner or org admin who allowed the next upload to replace the current version without a checkout. Cleared by that upload.
+  OverwriteAllowedBy      Users?           @relation("ProjectOverwriteGrants", fields: [OverwriteAllowedById], references: [Id], onDelete: SetNull, onUpdate: NoAction, map: "FK_Projects_Users_OverwriteAllowedById")
   Reviewers               Reviewers[]
   ProjectActions          ProjectActions[]
 
   @@index([GroupId], map: "IX_Projects_GroupId")
   @@index([ImportId], map: "IX_Projects_ImportId")
   @@index([OrganizationId], map: "IX_Projects_OrganizationId")
+  @@index([CheckedOutById], map: "IX_Projects_CheckedOutById")
+  @@index([OverwriteAllowedById], map: "IX_Projects_OverwriteAllowedById")
   @@index([OwnerId], map: "IX_Projects_OwnerId")
   @@index([TypeId], map: "IX_Projects_TypeId")
 }
@@ -466,6 +476,8 @@ model Users {
   Organizations                 Organizations[]
   ProjectImports                ProjectImports[]
   Projects                      Projects[]
+  CheckedOutProjects            Projects[]                      @relation("ProjectCheckouts")
+  OverwriteGrantedProjects      Projects[]                      @relation("ProjectOverwriteGrants")
   UserRoles                     UserRoles[]
   UserTasks                     UserTasks[]
   ProductTransitions            ProductTransitions[]

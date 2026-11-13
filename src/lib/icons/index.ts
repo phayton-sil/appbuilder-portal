@@ -196,6 +196,18 @@ export function getProjectActionIcon(
         default:
           return Icons.Import;
       }
+    case ProjectActionType.Checkout:
+      switch (args.Action as ValidI13nKey) {
+        case ProjectActionString.CheckOut:
+          return Icons.Locked;
+        case ProjectActionString.AllowOverwrite:
+        case ProjectActionString.OverwriteUsed:
+          return Icons.Overwrite;
+        case ProjectActionString.CancelOverwrite:
+          return Icons.Close;
+        default:
+          return Icons.Unlocked;
+      }
     default:
       return '';
   }
@@ -370,6 +382,7 @@ export const Icons = {
   NotifyOn: 'iconamoon:notification-fill',
   Open: 'mdi:open-in-new',
   Organization: 'clarity:organization-solid',
+  Overwrite: 'mdi:file-replace-outline',
   Package: 'mdi:package-variant',
   Phone: 'ic:baseline-phone',
   Product: 'system-uicons:box',

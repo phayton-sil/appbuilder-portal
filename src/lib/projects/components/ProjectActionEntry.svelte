@@ -93,6 +93,8 @@
     {/if}
   {:else if act.ActionType === ProjectActionType.Reviewer}
     {act.Value}
+  {:else if act.ActionType === ProjectActionType.Checkout && act.ExternalId}
+    {users?.find((u) => u.Id === act.ExternalId)?.Name ?? `User #${act.ExternalId}`}
   {/if}
 {/snippet}
 

@@ -37,7 +37,8 @@ export enum ProjectActionType {
   Author, // Add or Remove
   Reviewer, // Add or Remove
   EditField, // Edit other fields
-  Creation // Creation of the project itself
+  Creation, // Creation of the project itself
+  Checkout // Check out, check in, or unlock in App Builder
 }
 
 export const ProjectActionString = {
@@ -60,7 +61,15 @@ export const ProjectActionString = {
   EditName: 'project_name',
   EditLanguage: 'project_languageCode',
   EditDescription: 'common_description',
-  EditSettings: 'project_settings_title'
+  EditSettings: 'project_settings_title',
+  CheckOut: 'project_checkout_checkOut',
+  CheckIn: 'project_checkout_checkIn',
+  // ExternalId is the user whose checkout was released
+  Unlock: 'project_checkout_unlock',
+  AllowOverwrite: 'project_checkout_allowOverwrite',
+  CancelOverwrite: 'project_checkout_cancelOverwrite',
+  // ExternalId is the user who allowed the overwrite
+  OverwriteUsed: 'project_checkout_overwriteUsed'
 } as const satisfies Record<string, ValidI13nKey>;
 
 export const ProjectActionValue = {

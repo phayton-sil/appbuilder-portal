@@ -3,7 +3,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Prisma } from '@prisma/client';
 import { ProjectActionString, ProjectActionType, RoleId, TaskType } from '$lib/prisma';
 import { getProductActions } from '$lib/products';
-import { canModifyProject } from '$lib/projects';
+import { canModifyProject, projectCheckoutSelect } from '$lib/projects';
 import { userGroupsForOrg } from '$lib/projects/server';
 import { getURLandToken } from '$lib/server/build-engine-api/requests';
 import { DatabaseReads } from '$lib/server/database';
@@ -141,6 +141,7 @@ export async function getProjectDetails(id: number, userSession: Session['user']
               }
             }
           },
+          ...projectCheckoutSelect,
           Reviewers: {
             select: {
               Id: true,
@@ -339,6 +340,7 @@ export async function getProjectDetails(id: number, userSession: Session['user']
                   (pa) =>
                     pa.ExternalId &&
                     (pa.ActionType === ProjectActionType.Author ||
+                      pa.ActionType === ProjectActionType.Checkout ||
                       (pa.ActionType === ProjectActionType.OwnerGroup &&
                         pa.Action !== ProjectActionString.AssignGroup))
                 ).map((pa) => pa.ExternalId!)
